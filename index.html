@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TracIn — Estimating Training Data Influence by Tracing Gradient Descent</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<style>
+:root{
+  --bg:#f7f5f1; --card:#ffffff; --ink:#23272f; --muted:#6b7280;
+  --accent:#1e40af; --accent-ink:#1e3a8a; --accent-bg:#eff6ff;
+  --border:#e8e4dc; --radius:16px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",sans-serif;
+  font-size:17px;line-height:1.85;-webkit-font-smoothing:antialiased}
+.progress{position:fixed;top:0;left:0;height:3px;background:var(--accent);width:0;z-index:50}
+.wrap{max-width:800px;margin:0 auto;padding:32px 20px 80px}
+.hero{background:linear-gradient(135deg,#1e3a8a,#3b82f6);color:#fff;border-radius:20px;padding:40px 36px}
+.kicker{display:inline-block;font-size:13px;letter-spacing:.1em;background:rgba(255,255,255,.18);padding:4px 14px;border-radius:999px;margin-bottom:16px}
+.hero h1{margin:0 0 10px;font-size:29px;line-height:1.45;font-weight:700}
+.hero .sub{opacity:.88;font-size:14.5px;margin:0}
+.toc{position:sticky;top:12px;background:var(--card);border:1px solid var(--border);border-radius:14px;
+  padding:12px 18px;margin:20px 0;box-shadow:0 2px 12px rgba(0,0,0,.05);z-index:10}
+.toc summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--muted);list-style:none}
+.toc summary::-webkit-details-marker{display:none}
+.toc nav{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.toc a{font-size:13.5px;color:var(--accent-ink);background:var(--accent-bg);padding:4px 12px;border-radius:999px;text-decoration:none}
+.sec{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:30px 34px;margin:0 0 18px;box-shadow:0 1px 6px rgba(0,0,0,.03);scroll-margin-top:80px}
+.sec h2{margin:0 0 18px;font-size:21px;display:flex;align-items:center;gap:12px;line-height:1.5}
+.sec h2 .n{display:inline-flex;width:32px;height:32px;border-radius:50%;background:var(--accent-bg);
+  color:var(--accent-ink);font-size:15px;align-items:center;justify-content:center;flex:none;font-weight:700}
+.sec h3{font-size:17.5px;margin:26px 0 10px}
+.sec h4{font-size:16px;margin:20px 0 8px}
+.sec p{margin:0 0 14px}
+.sec ul,.sec ol{margin:0 0 14px;padding-left:24px}
+.sec li{margin-bottom:10px}
+.sec li::marker{color:var(--accent);font-weight:600}
+.sec-lede{background:linear-gradient(180deg,#eff6ff 0%,#ffffff 100%);border-color:#bfdbfe}
+.sec-lede p{font-size:18px}
+.sec-qa ol{list-style:none;padding:0;counter-reset:q}
+.sec-qa ol>li{counter-increment:q;background:var(--bg);border:1px solid var(--border);border-radius:12px;
+  padding:18px 20px 18px 66px;position:relative;margin-bottom:14px}
+.sec-qa ol>li::before{content:counter(q);position:absolute;left:20px;top:20px;width:30px;height:30px;
+  border-radius:50%;background:var(--accent);color:#fff;font-weight:700;display:flex;align-items:center;
+  justify-content:center;font-size:15px}
+table{width:100%;border-collapse:collapse;font-size:14.5px;margin:6px 0 4px;line-height:1.6}
+th,td{border:1px solid var(--border);padding:9px 12px;text-align:left;vertical-align:top}
+th{background:#f3f4f6;font-weight:600;white-space:nowrap}
+tr:nth-child(even) td{background:#fafafa}
+a{color:var(--accent)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#f3f4f6;padding:2px 6px;border-radius:6px;font-size:.88em}
+pre{background:#1f2937;color:#e5e7eb;border-radius:12px;padding:16px 18px;overflow-x:auto}
+pre code{background:none;padding:0;color:inherit}
+.katex{font-size:1.05em}
+.katex-display{margin:18px 0;overflow-x:auto;overflow-y:hidden}
+.tag{display:inline-block;font-size:12.5px;background:#f3f4f6;border:1px solid var(--border);
+  border-radius:999px;padding:2px 10px;margin:2px 4px 2px 0;color:var(--muted)}
+.meta{display:flex;flex-wrap:wrap;gap:2px;margin:4px 0 10px}
+.foot{text-align:center;color:var(--muted);font-size:13.5px;margin-top:36px;line-height:2}
+.foot a{color:var(--accent)}
+@media(max-width:640px){.sec{padding:22px 20px}.hero{padding:30px 24px}.hero h1{font-size:23px}body{font-size:16px}}
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<div class="wrap">
+  <header class="hero">
+    <span class="kicker">tracin</span>
+    <h1>TracIn: Estimating Training Data Influence by Tracing Gradient Descent</h1>
+    <p class="sub">不用 Hessian，checkpoint 梯度点积求和估计影响 —— LLM 数据清洗最实用的基线</p>
+  </header>
+  <details class="toc" open>
+    <summary>目录（点击跳转）</summary>
+    <nav><a href="#sec-1">元信息</a><a href="#sec-2">一句话总结</a><a href="#sec-3">核心</a><a href="#sec-4">可迁移</a><a href="#sec-5">疑问 / 下一步</a><a href="#sec-6">原文金句</a><a href="#sec-7">复现链接</a></nav>
+  </details>
+  <section class="sec" id="sec-1"><h2><span class="n">1</span>元信息</h2>
+  <ul>
+    <li>Title: Estimating Training Data Influence by Tracing Gradient Descent (TracIn)</li>
+    <li>Authors / Org: Garima Pruthi, Frederick Liu, Mukund Sundararajan, et al. / Google</li>
+    <li>Link / arXiv: <a href="https://arxiv.org/abs/2002.08484">https://arxiv.org/abs/2002.08484</a></li>
+    <li>PDF: <a href="https://proceedings.neurips.cc/paper/2020/file/e6385d39ec9394f2f3a354d9d2b88eec-Paper.pdf">NeurIPS 2020</a></li>
+    <li>Blog: <a href="https://research.google/blog/tracin-a-simple-method-to-estimate-training-data-influence/">Google Research Blog</a></li>
+    <li>Code: <a href="https://github.com/frederick0329/TracIn">github.com/frederick0329/TracIn</a></li>
+    <li>Date read: 2026-08-05</li>
+  </ul>
+  <div class="meta"><span class="tag">data-attribution</span><span class="tag">tracin</span><span class="tag">influence-functions</span><span class="tag">coding-data</span><span class="tag">data-cleaning</span><span class="tag">self-influence</span></div>
+  </section>
+  <section class="sec sec-lede" id="sec-2"><h2><span class="n">2</span>一句话总结</h2>
+  <p>不用 Hessian，把训练过程上每个 checkpoint 的梯度点积加起来估计影响 —— TracIn，工程上把 Influence Functions 做到了大模型可用的版本，是现在 LLM 数据清洗最实用的基线。</p>
+  </section>
+  <section class="sec" id="sec-3"><h2><span class="n">3</span>核心</h2>
+  <h3>3.1 Motivation</h3>
+  <ul>
+    <li>Influence Functions 要 $H^{-1}$，贵、不稳、非凸不成立。</li>
+    <li>作者问：既然模型是 SGD 一步步走出来的，能不能直接看路上谁推了谁一把？理想的 influence 应该是整个轨迹上损失下降的累积。</li>
+  </ul>
+  <h3>3.2 Data Pipeline</h3>
+  <ul>
+    <li>训练时存 $K$ 个 checkpoint $\theta_{t_1}...\theta_{t_K}$，学习率 $\eta_t$</li>
+    <li>对任一训练点 $z$ 和测试点 $z'$：</li>
+  </ul>
+  <p>$$ TracIn(z,z') = \sum_{t} \eta_t \nabla L(z',\theta_t)^T \nabla L(z,\theta_t) $$</p>
+  <ul>
+    <li>实际用 TracInCP：只用 checkpoint，忽略同一 checkpoint 内不同 step 的差异，batch 内近似</li>
+    <li>Self-influence：$z'=z$ 时，分数越高，模型越靠死记这条点才能记住它</li>
+  </ul>
+  <h3>3.3 Key Tricks（3 个最值得抄的）</h3>
+  <ol>
+    <li><strong>不要 Hessian，只要点积</strong>：$\eta \nabla_{test}\cdot\nabla_{train}$ 就是 influence。实现上就是两次 backward，算 cosine/dot，比 Influence Functions 快 10-100x</li>
+    <li><strong>Checkpoint 选择</strong>：论文用最后几个 + 均匀采样，3-5 个就够。实践：早期 checkpoint 抓语法/去重噪声，后期 checkpoint 抓语义难例。对 code 建议：epoch 1, 2, 末尾各 1 个，共 3 个起步</li>
+    <li><strong>Self-influence = 脏数据探测器</strong>：把训练集按 self-influence 排序，top 1% 拿去人工看，基本是 mislabeled / 爬到的孤岛代码 / 极长尾 API / 重复但标签矛盾的数据。Google 用这个清 10% 数据不掉点</li>
+  </ol>
+  <h3>3.4 Results / 用途验证</h3>
+  <ul>
+    <li>CIFAR/MNIST 上：和真 LOO 相关性 &gt;0.8，Influence Functions LiSSA 只有 0.6 且慢 10x</li>
+    <li>找 mislabeled：按 self-influence 排序，查 20% 数据就能找到 80% 错误标签，比 Influence Functions 快</li>
+    <li>工程上已用到 BERT/ResNet，checkpoint 存 3-10 个就行，内存可接受</li>
+  </ul>
+  </section>
+  <section class="sec" id="sec-4"><h2><span class="n">4</span>可迁移</h2>
+  <h3>对 coding data 工作的直接可试点</h3>
+  <ol>
+    <li><strong>脏数据过滤器（今晚就能跑）</strong>：用 1B proxy 训 3 epoch，存 3 个 checkpoint，算所有训练 code 的 self-influence。Top 2% 导出，看是不是过时语言 / 错的 API / 从 StackOverflow 拷的带问号的代码。清掉再训 7B，看 HumanEval 有没有稳</li>
+    <li><strong>合成数据价值评估</strong>：合成的 code 不是全留。用 TracIn：对 LiveCodeBench 难例算 $TracIn(合成样本, 难例)$，平均为正才留。比“过得了单元测试就留”更贴近真实 eval</li>
+    <li><strong>冗余 prune</strong>：Helpful 的样本彼此梯度余弦相似度高，只留 1 个，呼应 infra 省钱思维</li>
+  </ol>
+  <h3>Infra 视角</h3>
+  <ul>
+    <li>不用二阶，天然 DDPer-friendly，checkpoint 存量 $K \times P$，可以只存 LoRA 分支梯度来把成本压到 1/100</li>
+    <li>可扩展到 RL data：RLHF 偏好数据哪条最有用，用 TracIn 对 reward model 难例打分</li>
+  </ul>
+  </section>
+  <section class="sec" id="sec-5"><h2><span class="n">5</span>疑问 / 下一步</h2>
+  <ul>
+    <li>3 个 checkpoint 的采样策略对 code 任务是否最优？试早期密集 vs 均匀</li>
+    <li>TracInCP 有偏，TracIn 论文里 checkpoint 内用一阶近似，误差多大？看后续 2023 TracIn++ / D-TracIn</li>
+    <li>今晚实验：跑通 <code>tracin_demo.py</code> 20 行版，对手头小 code 集算 self-influence 分布，是否长尾</li>
+  </ul>
+  </section>
+  <section class="sec" id="sec-6"><h2><span class="n">6</span>原文金句</h2>
+  <blockquote>
+    <p>The influence of a training example can be estimated by tracing the loss reduction it contributes during training.</p>
+    <p>Self-influence is a strong signal for mislabeled and outlier examples.</p>
+  </blockquote>
+  </section>
+  <section class="sec" id="sec-7"><h2><span class="n">7</span>复现链接</h2>
+  <ul>
+    <li>Official TF: <a href="https://github.com/frederick0329/TracIn">github.com/frederick0329/TracIn</a></li>
+    <li>PyTorch toy: <code>tracin_demo.py</code>（本文件夹）</li>
+    <li>Blog: <a href="https://research.google/blog/tracin-a-simple-method-to-estimate-training-data-influence/">research.google/blog</a></li>
+  </ul>
+  </section>
+  <div class="foot">由 <a href="https://github.com/Papa-Panda/tracin/blob/master/NOTES.md">GitHub NOTES.md</a> 生成 · 公式由 KaTeX 渲染（需联网加载）</div>
+</div>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+  renderMathInElement(document.body, {
+    delimiters: [
+      {left: "$$", right: "$$", display: true},
+      {left: "$", right: "$", display: false}
+    ],
+    throwOnError: false
+  });
+  var bar = document.getElementById("progress");
+  window.addEventListener("scroll", function() {
+    var h = document.documentElement;
+    var p = h.scrollTop / (h.scrollHeight - h.clientHeight) * 100;
+    bar.style.width = p + "%";
+  }, {passive: true});
+});
+</script>
+</body>
+</html>
